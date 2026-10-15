@@ -443,6 +443,15 @@ async function loadAll(){
 // ══════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════
+  function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[ch]);
+}
 function fmtDur(s){
   if(!s || s<=0) return '—';
   if(s < 60) return s + 's';
@@ -907,8 +916,49 @@ async function loadSessionsAnalytics(){
   const el = document.getElementById('session-cards');
   el.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
 
-  const { data: sessions } = await Promise.resolve(SB.from('nira_sessions').select('*').eq('is_active',false).order('session_start',{ascending:false}).limit(500)).catch(()=>({data:null}));
+const { data: sessions, error } = await SB
+  .from('nira_sessions')
+  .select(`
+    id,
+    user_id,
+    session_start,
+    last_activity,
+    session_end,
+    duration_seconds,
+    request_count,
+    tools_used,
+    is_active,
+    inactivity_timeout
+  `)
+  .order('session_start', { ascending: false })
+  .limit(500);
 
+if (error) {
+  el.innerHTML = `
+    <div class="warning-box">
+      Unable to load sessions: ${escapeHTML(error.message)}
+    </div>`;
+  return;
+}
+
+const allSessions = sessions || [];
+
+const knownDurationSessions = allSessions.filter(
+  s => s.duration_seconds != null && s.duration_seconds > 0
+);
+
+const missingDurationSessions = allSessions.filter(
+  s => s.duration_seconds == null
+);
+
+const totalSecs = knownDurationSessions.reduce(
+  (sum, s) => sum + s.duration_seconds,
+  0
+);
+
+const uniqueUsers = new Set(
+  allSessions.map(s => s.user_id)
+).size;
   if(!sessions || !sessions.length){
     el.innerHTML = `
       <div class="card gold" style="grid-column:1/-1">
