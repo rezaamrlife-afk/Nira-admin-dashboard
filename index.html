@@ -179,12 +179,31 @@ tr:last-child td{border-bottom:none}
   .main{margin-left:200px}
   .charts-row{grid-template-columns:1fr}
   .chart-box.wide{grid-column:1}
+  .dp-grid{grid-template-columns:1fr 1fr}
 }
 @media(max-width:650px){
   .sidebar{display:none}
   .main{margin-left:0}
-  .content{padding:16px}
-  .cards-grid{grid-template-columns:1fr 1fr}
+  .content{padding:12px}
+  .cards-grid{grid-template-columns:1fr 1fr;gap:10px}
+  .card{padding:14px 14px}
+  .card-val{font-size:22px}
+  .topbar{padding:10px 14px;gap:8px}
+  .topbar h1{font-size:14px}
+  #last-updated{display:none}
+  .charts-row{gap:10px}
+  .chart-box{padding:12px}
+  .table-hdr{flex-wrap:wrap;gap:8px}
+  .tbl-search{width:100%}
+  .detail-panel{width:100vw}
+  .dp-grid{grid-template-columns:1fr}
+  table{font-size:11px}
+  th,td{padding:8px 8px}
+  .user-email{display:none}
+  .actions-cell button{padding:3px 7px}
+}
+@media(max-width:400px){
+  .cards-grid{grid-template-columns:1fr}
 }
 </style>
 </head>
