@@ -973,8 +973,10 @@ const uniqueUsers = new Set(
     return;
   }
 
-  const totalSecs = sessions.reduce((a,s)=>a+(s.duration_seconds||0),0);
-  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.length) : 0;
+const totalSecs = knownDurationSessions.reduce(
+  (sum, s) => sum + Number(s.duration_seconds),
+  0
+);  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.length) : 0;
   const uniqueUsers = new Set(sessions.map(s=>s.user_id)).size;
 
   el.innerHTML = `
