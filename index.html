@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIRA Admin Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0a0e1a;--bg2:#111827;--bg3:#1a2235;--bg4:#1e2a40;
+  --gold:#c9a84c;--gold2:#e8c96d;--text:#e8edf5;--muted:#7a8ba8;
+  --bdr:#2a3550;--bdr2:#3a4a6a;--r:10px;--rl:14px;
+  --red:#e05555;--green:#3ecf8e;--blue:#4a90e2;--purple:#9b59b6;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh}
+
+/* ── Layout ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--bdr);flex-shrink:0;position:fixed;top:0;left:0;height:100vh;overflow-y:auto;z-index:100}
+.main{margin-left:220px;flex:1;padding:0}
+
+/* ── Sidebar ── */
+.sb-brand{padding:20px 18px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:10px}
+.sb-brand-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--gold),#8a5a00);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.sb-brand-txt .t1{font-size:13px;font-weight:700;color:var(--gold);letter-spacing:.5px}
+.sb-brand-txt .t2{font-size:10px;color:var(--muted);letter-spacing:1px}
+.sb-nav{padding:12px 0}
+.sb-section{padding:6px 18px 4px;font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;color:var(--muted);transition:all .15s;font-size:13px;border-left:3px solid transparent}
+.sb-item:hover{background:var(--bg3);color:var(--text)}
+.sb-item.active{background:rgba(201,168,76,.1);color:var(--gold);border-left-color:var(--gold)}
+.sb-item .ico{width:18px;text-align:center;font-size:15px}
+
+/* ── Topbar ── */
+.topbar{background:var(--bg2);border-bottom:1px solid var(--bdr);padding:14px 28px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:90}
+.topbar h1{font-size:16px;font-weight:700;color:var(--text);flex:1}
+.tb-badge{background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.3);color:var(--gold);font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.5px}
+.tb-refresh{background:var(--bg3);border:1px solid var(--bdr);color:var(--muted);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;transition:all .15s}
+.tb-refresh:hover{border-color:var(--gold);color:var(--gold)}
+#last-updated{font-size:11px;color:var(--muted)}
+
+/* ── Content ── */
+.content{padding:24px 28px}
+.page{display:none}.page.active{display:block}
+
+/* ── Summary Cards ── */
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:18px 20px;position:relative;overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:var(--bdr2)}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.card.gold::before{background:linear-gradient(90deg,var(--gold),var(--gold2))}
+.card.green::before{background:linear-gradient(90deg,#3ecf8e,#27ae60)}
+.card.blue::before{background:linear-gradient(90deg,#4a90e2,#7b6adf)}
+.card.purple::before{background:linear-gradient(90deg,#9b59b6,#e74c3c)}
+.card.red::before{background:linear-gradient(90deg,#e05555,#c0392b)}
+.card-label{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:8px}
+.card-val{font-size:26px;font-weight:700;color:var(--text);line-height:1}
+.card-sub{font-size:11px;color:var(--muted);margin-top:5px}
+.card-icon{position:absolute;right:16px;top:16px;font-size:24px;opacity:.18}
+
+/* ── Charts row ── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-box{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:18px}
+.chart-box.wide{grid-column:1/-1}
+.chart-title{font-size:12px;font-weight:700;color:var(--text);letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.chart-title .dot{width:8px;height:8px;border-radius:50%;background:var(--gold)}
+canvas{max-height:220px}
+
+/* ── Table ── */
+.table-wrap{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);overflow:hidden;margin-bottom:24px}
+.table-hdr{padding:16px 20px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.table-hdr h2{font-size:13px;font-weight:700;flex:1}
+.tbl-search{background:var(--bg3);border:1px solid var(--bdr);border-radius:6px;padding:6px 12px;color:var(--text);font-size:12px;width:200px;outline:none}
+.tbl-search:focus{border-color:var(--gold)}
+.tbl-search::placeholder{color:var(--muted)}
+.btn-export{background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);color:var(--gold);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;transition:all .15s}
+.btn-export:hover{background:rgba(201,168,76,.2)}
+.filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.flt-btn{background:var(--bg3);border:1px solid var(--bdr);color:var(--muted);padding:4px 12px;border-radius:20px;cursor:pointer;font-size:11px;transition:all .15s}
+.flt-btn.active{background:rgba(201,168,76,.15);border-color:var(--gold);color:var(--gold)}
+table{width:100%;border-collapse:collapse}
+th{padding:10px 14px;text-align:left;font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;background:var(--bg3);border-bottom:1px solid var(--bdr);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:var(--text)}
+th.sort-asc::after{content:' ↑'}th.sort-desc::after{content:' ↓'}
+td{padding:11px 14px;border-bottom:1px solid rgba(42,53,80,.5);font-size:12px;color:var(--text);vertical-align:middle}
+tr:hover td{background:rgba(26,34,53,.5)}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.3px}
+.badge.pro{background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.3);color:var(--gold)}
+.badge.free{background:rgba(74,144,226,.1);border:1px solid rgba(74,144,226,.3);color:var(--blue)}
+.badge.active{background:rgba(62,207,142,.1);border:1px solid rgba(62,207,142,.3);color:var(--green)}
+.badge.inactive{background:rgba(42,53,80,.5);border:1px solid var(--bdr);color:var(--muted)}
+.badge.returning{background:rgba(155,89,182,.1);border:1px solid rgba(155,89,182,.3);color:var(--purple)}
+.user-cell{display:flex;align-items:center;gap:10px}
+.user-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--gold),#5a3a00);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.user-name{font-weight:600;color:var(--text)}
+.user-email{font-size:11px;color:var(--muted)}
+.user-row{cursor:pointer}.user-row:hover .user-name{color:var(--gold)}
+.actions-cell button{background:var(--bg3);border:1px solid var(--bdr);color:var(--muted);padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;margin-right:4px;transition:all .15s}
+.actions-cell button:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ── Pagination ── */
+.pagination{display:flex;align-items:center;gap:8px;padding:14px 20px;justify-content:flex-end;border-top:1px solid var(--bdr)}
+.pg-btn{background:var(--bg3);border:1px solid var(--bdr);color:var(--muted);padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px}
+.pg-btn:hover{border-color:var(--gold);color:var(--gold)}
+.pg-btn:disabled{opacity:.3;cursor:not-allowed}
+.pg-info{font-size:12px;color:var(--muted)}
+
+/* ── Detail Panel ── */
+.detail-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;backdrop-filter:blur(3px)}
+.detail-overlay.open{display:flex;align-items:flex-start;justify-content:flex-end}
+.detail-panel{background:var(--bg2);border-left:1px solid var(--bdr);width:560px;max-width:100vw;height:100vh;overflow-y:auto;padding:0;animation:slideIn .25s ease}
+@keyframes slideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.dp-header{background:var(--bg3);padding:20px 24px;border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px}
+.dp-avatar{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--gold),#5a3a00);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0}
+.dp-name{font-size:15px;font-weight:700}.dp-email{font-size:12px;color:var(--muted);margin-top:2px}
+.dp-close{margin-left:auto;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:5px;transition:all .15s}
+.dp-close:hover{color:var(--text);background:var(--bdr)}
+.dp-body{padding:20px 24px}
+.dp-section{margin-bottom:20px}
+.dp-section-title{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
+.dp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dp-stat{background:var(--bg3);border:1px solid var(--bdr);border-radius:8px;padding:12px 14px}
+.dp-stat .lbl{font-size:10px;color:var(--muted);margin-bottom:4px}
+.dp-stat .val{font-size:16px;font-weight:700;color:var(--text)}
+.dp-stat .sub{font-size:10px;color:var(--muted);margin-top:2px}
+.session-list{display:flex;flex-direction:column;gap:8px}
+.session-item{background:var(--bg3);border:1px solid var(--bdr);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:1fr auto;gap:4px}
+.si-date{font-size:12px;font-weight:600}.si-time{font-size:11px;color:var(--muted)}
+.si-dur{font-size:13px;font-weight:700;color:var(--gold);text-align:right}
+.si-reqs{font-size:11px;color:var(--muted);text-align:right}
+.si-tools{grid-column:1/-1;display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+.si-tool{font-size:10px;background:rgba(74,144,226,.1);border:1px solid rgba(74,144,226,.2);color:var(--blue);padding:1px 7px;border-radius:10px}
+.req-list{max-height:300px;overflow-y:auto}
+.req-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(42,53,80,.4)}
+.req-item:last-child{border-bottom:none}
+.req-tool{font-size:11px;background:var(--bg3);border:1px solid var(--bdr);padding:2px 8px;border-radius:5px;color:var(--muted);min-width:100px;text-align:center}
+.req-time{font-size:11px;color:var(--muted);flex:1}
+.req-ok{color:var(--green);font-size:12px}.req-err{color:var(--red);font-size:12px}
+.warning-box{background:rgba(224,85,85,.08);border:1px solid rgba(224,85,85,.25);border-radius:8px;padding:12px 14px;font-size:12px;color:#e88;margin-bottom:16px}
+.info-box{background:rgba(74,144,226,.08);border:1px solid rgba(74,144,226,.25);border-radius:8px;padding:12px 14px;font-size:12px;color:#7ab;margin-bottom:16px}
+
+/* ── Date filter ── */
+.date-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+.date-row label{font-size:11px;color:var(--muted)}
+.date-row input{background:var(--bg3);border:1px solid var(--bdr);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none}
+.date-row input:focus{border-color:var(--gold)}
+.period-btns{display:flex;gap:6px}
+.pd-btn{background:var(--bg3);border:1px solid var(--bdr);color:var(--muted);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s}
+.pd-btn.active{background:rgba(201,168,76,.15);border-color:var(--gold);color:var(--gold)}
+
+/* ── Loading / empty ── */
+.loading-state{text-align:center;padding:40px;color:var(--muted);font-size:13px}
+.spinner{display:inline-block;width:22px;height:22px;border:2px solid var(--bdr);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:40px;color:var(--muted)}
+.empty-icon{font-size:32px;margin-bottom:8px;opacity:.4}
+
+/* ── Login screen ── */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)}
+.login-box{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:36px 40px;width:360px;text-align:center}
+.login-logo{font-size:32px;margin-bottom:6px}
+.login-title{font-size:18px;font-weight:700;color:var(--gold);margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
+.lf-group{text-align:left;margin-bottom:14px}
+.lf-group label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:.5px}
+.lf-group input{width:100%;background:var(--bg3);border:1px solid var(--bdr);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;outline:none;transition:border-color .15s}
+.lf-group input:focus{border-color:var(--gold)}
+.lf-btn{width:100%;background:linear-gradient(135deg,var(--gold),#a07830);color:#111;font-weight:700;border:none;border-radius:6px;padding:10px;font-size:13px;cursor:pointer;margin-top:8px;transition:opacity .15s}
+.lf-btn:hover{opacity:.9}
+.lf-err{color:var(--red);font-size:12px;margin-top:8px;display:none}
+#app-container{display:none}
+
+/* ── Responsive ── */
+@media(max-width:900px){
+  .sidebar{width:200px}
+  .main{margin-left:200px}
+  .charts-row{grid-template-columns:1fr}
+  .chart-box.wide{grid-column:1}
+}
+@media(max-width:650px){
+  .sidebar{display:none}
+  .main{margin-left:0}
+  .content{padding:16px}
+  .cards-grid{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🛡️</div>
+    <div class="login-title">NIRA Admin</div>
+    <div class="login-sub">Restricted access — administrators only</div>
+    <div class="lf-group"><label>EMAIL</label><input type="email" id="adm-email" placeholder="admin@niracademy.com"></div>
+    <div class="lf-group"><label>PASSWORD</label><input type="password" id="adm-pass" placeholder="••••••••"></div>
+    <button class="lf-btn" onclick="adminLogin()">Sign In</button>
+    <div class="lf-err" id="lf-err"></div>
+  </div>
+</div>
+
+<!-- APP CONTAINER -->
+<div id="app-container">
+<div class="layout">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-brand-icon">N</div>
+      <div class="sb-brand-txt"><span class="t1">NIRA</span><span class="t2">ADMIN</span></div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-section">OVERVIEW</div>
+      <div class="sb-item active" onclick="showPage('overview')"><span class="ico">📊</span>Dashboard</div>
+      <div class="sb-item" onclick="showPage('users')"><span class="ico">👥</span>Users</div>
+      <div class="sb-section">ANALYTICS</div>
+      <div class="sb-item" onclick="showPage('usage')"><span class="ico">⚡</span>Usage Analytics</div>
+      <div class="sb-item" onclick="showPage('sessions')"><span class="ico">⏱️</span>Time Tracking</div>
+      <div class="sb-item" onclick="showPage('errors')"><span class="ico">⚠️</span>Errors</div>
+      <div class="sb-section">ACCOUNT</div>
+      <div class="sb-item" onclick="adminLogout()"><span class="ico">🚪</span>Sign Out</div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="page-title">Dashboard Overview</h1>
+      <span class="tb-badge">ADMIN</span>
+      <span id="last-updated"></span>
+      <button class="tb-refresh" onclick="loadAll()">⟳ Refresh</button>
+    </div>
+
+    <div class="content">
+
+      <!-- OVERVIEW PAGE -->
+      <div class="page active" id="page-overview">
+        <div class="cards-grid" id="overview-cards">
+          <div class="loading-state"><div class="spinner"></div><br>Loading…</div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-box"><div class="chart-title"><div class="dot"></div>Daily Requests (Last 30 Days)</div><canvas id="chart-daily"></canvas></div>
+          <div class="chart-box"><div class="chart-title"><div class="dot" style="background:#4a90e2"></div>Tool Usage Breakdown</div><canvas id="chart-tools"></canvas></div>
+          <div class="chart-box wide"><div class="chart-title"><div class="dot" style="background:#3ecf8e"></div>New Registrations (Last 30 Days)</div><canvas id="chart-regs"></canvas></div>
+        </div>
+      </div>
+
+      <!-- USERS PAGE -->
+      <div class="page" id="page-users">
+        <div class="date-row">
+          <div class="period-btns">
+            <button class="pd-btn active" onclick="setPeriod('all',this)">All Time</button>
+            <button class="pd-btn" onclick="setPeriod('30d',this)">30 Days</button>
+            <button class="pd-btn" onclick="setPeriod('7d',this)">7 Days</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+            <label>Filter:</label>
+            <select id="status-filter" style="background:var(--bg3);border:1px solid var(--bdr);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none" onchange="filterUsers()">
+              <option value="all">All Users</option>
+              <option value="active">Active (7d)</option>
+              <option value="inactive">Inactive</option>
+              <option value="pro">Pro Plan</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-hdr">
+            <h2>Registered Users</h2>
+            <input class="tbl-search" id="user-search" placeholder="Search name or email…" oninput="filterUsers()">
+            <button class="btn-export" onclick="exportCSV()">⬇ Export CSV</button>
+          </div>
+          <div id="users-table-body">
+            <div class="loading-state"><div class="spinner"></div><br>Loading users…</div>
+          </div>
+          <div class="pagination" id="users-pagination"></div>
+        </div>
+      </div>
+
+      <!-- USAGE ANALYTICS PAGE -->
+      <div class="page" id="page-usage">
+        <div class="date-row">
+          <div class="period-btns">
+            <button class="pd-btn" onclick="setUsagePeriod('day',this)">Today</button>
+            <button class="pd-btn active" onclick="setUsagePeriod('week',this)">This Week</button>
+            <button class="pd-btn" onclick="setUsagePeriod('month',this)">This Month</button>
+          </div>
+        </div>
+        <div class="cards-grid" id="usage-cards"></div>
+        <div class="charts-row">
+          <div class="chart-box wide"><div class="chart-title"><div class="dot"></div>Requests Per Day</div><canvas id="chart-usage-daily"></canvas></div>
+          <div class="chart-box"><div class="chart-title"><div class="dot" style="background:#9b59b6"></div>Top Users by Requests</div><canvas id="chart-top-users"></canvas></div>
+          <div class="chart-box"><div class="chart-title"><div class="dot" style="background:#4a90e2"></div>Requests by Hour of Day</div><canvas id="chart-by-hour"></canvas></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-hdr"><h2>User Rankings by Usage</h2></div>
+          <div id="rankings-table"></div>
+        </div>
+      </div>
+
+      <!-- SESSIONS / TIME TRACKING PAGE -->
+      <div class="page" id="page-sessions">
+        <div class="info-box">
+          ℹ️ <strong>Historical Data Limitation:</strong> Session duration tracking begins from when the new tracking code was deployed. Past sessions before this date cannot be recovered. The <code>usage_daily</code> table contains historical request counts per day.
+        </div>
+        <div class="cards-grid" id="session-cards"></div>
+        <div class="charts-row">
+          <div class="chart-box wide"><div class="chart-title"><div class="dot"></div>Average Session Duration by Day (minutes)</div><canvas id="chart-session-dur"></canvas></div>
+          <div class="chart-box"><div class="chart-title"><div class="dot" style="background:#3ecf8e"></div>Session Distribution (duration)</div><canvas id="chart-session-dist"></canvas></div>
+          <div class="chart-box"><div class="chart-title"><div class="dot" style="background:#9b59b6"></div>Top Users by Time Spent</div><canvas id="chart-time-users"></canvas></div>
+        </div>
+        <div class="table-wrap">
+          <div class="table-hdr"><h2>Recent Sessions</h2><button class="btn-export" onclick="exportSessions()">⬇ Export CSV</button></div>
+          <div id="sessions-table"></div>
+        </div>
+      </div>
+
+      <!-- ERRORS PAGE -->
+      <div class="page" id="page-errors">
+        <div class="cards-grid" id="error-cards"></div>
+        <div class="table-wrap">
+          <div class="table-hdr"><h2>Recent Errors</h2></div>
+          <div id="errors-table"></div>
+        </div>
+      </div>
+
+    </div><!-- content -->
+  </div><!-- main -->
+</div><!-- layout -->
+</div><!-- app-container -->
+
+<!-- USER DETAIL PANEL -->
+<div class="detail-overlay" id="detail-overlay" onclick="closeDetail(event)">
+  <div class="detail-panel" id="detail-panel">
+    <div class="dp-header">
+      <div class="dp-avatar" id="dp-avatar">?</div>
+      <div><div class="dp-name" id="dp-name">User</div><div class="dp-email" id="dp-email"></div></div>
+      <button class="dp-close" onclick="closeDetailPanel()">✕</button>
+    </div>
+    <div class="dp-body" id="dp-body">
+      <div class="loading-state"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://ailaesudrrqpprmgotgf.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpbGFlc3VkcnJxcHBybWdvdGdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5MjkzMzEsImV4cCI6MjA5NDUwNTMzMX0.mSPq_j_l9ph_AVEy15QdItgCNQtrj27j-z2PY5OBQSA';
+
+// ADMIN EMAILS — add authorized admin emails here
+const ADMIN_EMAILS = [
+  'rezatafreshii61@gmail.com',
+  'info@niracademy.com',
+  'niki@niracademy.com'
+];
+
+const SB = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ══ State ══
+let allUsers = [], filteredUsers = [], userPeriod = 'all', usagePeriod = 'week';
+let currentPage = 1; const PER_PAGE = 25;
+let charts = {};
+
+// ══ Chart defaults ══
+Chart.defaults.color = '#7a8ba8';
+Chart.defaults.borderColor = '#2a3550';
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+Chart.defaults.font.size = 11;
+
+// ══════════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════════
+async function adminLogin(){
+  const email = document.getElementById('adm-email').value.trim();
+  const pass  = document.getElementById('adm-pass').value;
+  const errEl = document.getElementById('lf-err');
+  errEl.style.display = 'none';
+
+  if(!email || !pass){ errEl.textContent='Enter email and password.'; errEl.style.display='block'; return; }
+
+  const { data, error } = await SB.auth.signInWithPassword({ email, password: pass });
+  if(error){ errEl.textContent = error.message; errEl.style.display='block'; return; }
+
+  if(!ADMIN_EMAILS.includes(email.toLowerCase())){
+    await SB.auth.signOut();
+    errEl.textContent = 'Access denied — not an admin account.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-container').style.display = 'block';
+  loadAll();
+}
+
+async function adminLogout(){
+  await SB.auth.signOut();
+  location.reload();
+}
+
+// Check existing session
+SB.auth.getSession().then(({ data }) => {
+  if(data?.session?.user && ADMIN_EMAILS.includes(data.session.user.email)){
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-container').style.display = 'block';
+    loadAll();
+  }
+});
+
+document.getElementById('adm-pass').addEventListener('keydown', e => { if(e.key==='Enter') adminLogin(); });
+
+// ══════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════
+const PAGE_TITLES = { overview:'Dashboard Overview', users:'Users', usage:'Usage Analytics', sessions:'Time Tracking', errors:'Errors' };
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.sb-item').forEach(i=>i.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelector(`.sb-item[onclick="showPage('${name}')"]`)?.classList.add('active');
+  document.getElementById('page-title').textContent = PAGE_TITLES[name] || name;
+  if(name==='users')  renderUsersTable();
+  if(name==='usage')  loadUsageAnalytics();
+  if(name==='sessions') loadSessionsAnalytics();
+  if(name==='errors') loadErrors();
+}
+
+// ══════════════════════════════════════════════════════
+// LOAD ALL
+// ══════════════════════════════════════════════════════
+async function loadAll(){
+  document.getElementById('last-updated').textContent = 'Loading…';
+  await Promise.all([ loadOverview(), loadUsers() ]);
+  document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ══════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════
+function fmtDur(s){
+  if(!s || s<=0) return '—';
+  if(s < 60) return s + 's';
+  if(s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+}
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '—'; }
+function fmtDateTime(d){ return d ? new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'; }
+function fmtRelative(d){
+  if(!d) return '—';
+  const diff = Date.now() - new Date(d).getTime();
+  if(diff < 60000) return 'just now';
+  if(diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if(diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  if(diff < 604800000) return Math.floor(diff/86400000) + 'd ago';
+  return fmtDate(d);
+}
+function isActive(lastSeen){ return lastSeen && (Date.now()-new Date(lastSeen).getTime()) < 7*86400*1000; }
+function isReturning(reqCount){ return reqCount > 1; }
+function initials(name, email){
+  if(name) return name.charAt(0).toUpperCase();
+  if(email) return email.charAt(0).toUpperCase();
+  return '?';
+}
+function makeChart(id, type, labels, datasets, options={}){
+  const canvas = document.getElementById(id);
+  if(!canvas) return;
+  if(charts[id]) charts[id].destroy();
+  charts[id] = new Chart(canvas, {
+    type, data:{ labels, datasets },
+    options:{ responsive:true, maintainAspectRatio:true, plugins:{ legend:{ display:datasets.length>1 }, ...options.plugins }, ...options }
+  });
+}
+
+// ══════════════════════════════════════════════════════
+// OVERVIEW
+// ══════════════════════════════════════════════════════
+async function loadOverview(){
+  // Fetch counts in parallel
+  const [savedRes, usageDailyRes, profilesRes] = await Promise.all([
+    SB.from('saved_prompts').select('id', {count:'exact',head:true}),
+    SB.from('usage_daily').select('user_id,usage_count,date'),
+    SB.from('user_profiles').select('id,email,created_at,last_sign_in_at,full_name')
+  ]);
+
+  const thirtyDaysAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  const sevenDaysAgo  = new Date(Date.now()-7*86400000).toISOString().split('T')[0];
+
+  // Total registered users from user_profiles
+  const totalUsers = profilesRes.data?.length || 0;
+
+  // Requests (30d) from usage_daily
+  const recent30 = usageDailyRes.data?.filter(r=>r.date >= thirtyDaysAgo) || [];
+  const totalReq30d = recent30.reduce((a,b)=>a+(b.usage_count||0),0);
+
+  // Active in last 7d — from usage_daily
+  const active7ud = usageDailyRes.data?.filter(r=>r.date >= sevenDaysAgo) || [];
+  let active7count = new Set(active7ud.map(r=>r.user_id)).size;
+  // Also check nira_requests (safe — ignore if table doesn't exist)
+  try {
+    const { data: recentReqs } = await SB.from('nira_requests').select('user_id').gte('created_at', new Date(Date.now()-7*86400000).toISOString()).limit(1000);
+    if(recentReqs?.length) {
+      const allActive = new Set([...active7ud.map(x=>x.user_id), ...recentReqs.map(r=>r.user_id)]);
+      active7count = allActive.size;
+    }
+  } catch(e) { /* nira_requests not ready yet */ }
+
+  const el = document.getElementById('overview-cards');
+  el.innerHTML = `
+    <div class="card gold"><div class="card-icon">👥</div><div class="card-label">Total Users</div><div class="card-val">${totalUsers}</div><div class="card-sub">registered accounts</div></div>
+    <div class="card green"><div class="card-icon">⚡</div><div class="card-label">Requests (30 days)</div><div class="card-val">${totalReq30d.toLocaleString()}</div><div class="card-sub">from usage_daily</div></div>
+    <div class="card blue"><div class="card-icon">💾</div><div class="card-label">Saved Prompts</div><div class="card-val">${(savedRes.count||0).toLocaleString()}</div><div class="card-sub">total in library</div></div>
+    <div class="card purple"><div class="card-icon">📅</div><div class="card-label">Active Users (7d)</div><div class="card-val">${active7count}</div><div class="card-sub">used app in last 7 days</div></div>
+  `;
+
+  // Charts
+  await Promise.all([drawDailyChart(), drawToolsChart(), drawRegsChart()]);
+}
+
+async function drawDailyChart(){
+  const since = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  const { data } = await SB.from('usage_daily').select('date,usage_count').gte('date',since).order('date');
+  if(!data?.length){ return; }
+
+  // Aggregate by date
+  const byDate = {};
+  data.forEach(r=>{ byDate[r.date] = (byDate[r.date]||0) + (r.usage_count||0); });
+  const labels = Object.keys(byDate).sort();
+  const vals   = labels.map(d=>byDate[d]);
+
+  makeChart('chart-daily','line',labels,[{
+    label:'Requests',data:vals,
+    borderColor:'#c9a84c',backgroundColor:'rgba(201,168,76,.1)',
+    fill:true,tension:.4,pointRadius:3,pointHoverRadius:5
+  }],{ scales:{ x:{ ticks:{ maxTicksLimit:8 } }, y:{ beginAtZero:true } } });
+}
+
+async function drawToolsChart(){
+  // Try nira_requests first
+  const { data: reqData } = await Promise.resolve(SB.from('nira_requests').select('tool').limit(5000)).catch(()=>({data:null}));
+  if(reqData && reqData.length > 0){
+    const counts = {};
+    reqData.forEach(r=>{ counts[r.tool||'general'] = (counts[r.tool||'general']||0)+1; });
+    const labels = Object.keys(counts);
+    const vals = labels.map(k=>counts[k]);
+    makeChart('chart-tools','doughnut',labels,[{data:vals,backgroundColor:['#c9a84c','#4a90e2','#3ecf8e','#9b59b6','#e05555','#e8c96d']}],
+      {plugins:{legend:{position:'right'}}});
+  } else {
+    // Fallback: usage_daily only has count, no tool breakdown
+    document.getElementById('chart-tools').parentElement.innerHTML += '<div style="text-align:center;font-size:11px;color:var(--muted);padding:8px">Tool breakdown available after tracking deployment</div>';
+  }
+}
+
+async function drawRegsChart(){
+  const { data } = await SB.from('user_profiles').select('created_at').order('created_at');
+  if(!data?.length){ document.getElementById('chart-regs').parentElement.style.display='none'; return; }
+  // Group by month
+  const monthMap = {};
+  data.forEach(r=>{
+    const m = r.created_at?.slice(0,7);
+    if(m) monthMap[m] = (monthMap[m]||0)+1;
+  });
+  const labels = Object.keys(monthMap).sort().slice(-12);
+  const vals   = labels.map(l=>monthMap[l]);
+  const ctx = document.getElementById('chart-regs');
+  if(!ctx) return;
+  new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'New Users', data:vals, backgroundColor:'rgba(74,144,226,0.7)', borderRadius:4 }] }, options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#7a8ba8'},grid:{display:false}}, y:{ticks:{color:'#7a8ba8'},grid:{color:'rgba(255,255,255,0.05)'}} } } });
+}
+
+// ══════════════════════════════════════════════════════
+// USERS
+// ══════════════════════════════════════════════════════
+async function loadUsers(){
+  // Start from user_profiles — every registered user
+  const [profilesRes, udRes, spRes, reqMetaRes] = await Promise.all([
+    SB.from('user_profiles').select('id,email,full_name,created_at,last_sign_in_at'),
+    SB.from('usage_daily').select('user_id,date,usage_count').order('date',{ascending:false}).limit(5000),
+    SB.from('saved_prompts').select('user_id,created_at').limit(5000),
+    Promise.resolve(SB.from('nira_requests').select('user_id,created_at').limit(5000)).catch(()=>({data:null}))
+  ]);
+
+  const userMap = {};
+
+  // Seed map from ALL registered users
+  (profilesRes.data||[]).forEach(p=>{
+    userMap[p.id] = {
+      user_id:     p.id,
+      email:       p.email,
+      name:        p.full_name || p.email?.split('@')[0],
+      registeredAt:p.created_at,
+      lastLogin:   p.last_sign_in_at,
+      totalReqs:   0,
+      savedPrompts:0,
+      lastReq:     null,
+      firstReq:    null,
+      lastActivity:null,
+      dailyData:   []
+    };
+  });
+
+  // Add usage_daily data
+  (udRes.data||[]).forEach(r=>{
+    if(!userMap[r.user_id]) userMap[r.user_id] = { user_id:r.user_id, totalReqs:0, dailyData:[] };
+    userMap[r.user_id].totalReqs += (r.usage_count||0);
+    userMap[r.user_id].dailyData.push(r);
+    if(!userMap[r.user_id].lastReq || r.date > userMap[r.user_id].lastReq) userMap[r.user_id].lastReq = r.date;
+    if(!userMap[r.user_id].firstReq || r.date < userMap[r.user_id].firstReq) userMap[r.user_id].firstReq = r.date;
+  });
+
+  // Add saved prompts count
+  (spRes.data||[]).forEach(r=>{
+    if(userMap[r.user_id]) userMap[r.user_id].savedPrompts = (userMap[r.user_id].savedPrompts||0)+1;
+  });
+
+  // Add last activity from nira_requests
+  (reqMetaRes.data||[]).forEach(r=>{
+    if(userMap[r.user_id]){
+      if(!userMap[r.user_id].lastActivity || r.created_at > userMap[r.user_id].lastActivity)
+        userMap[r.user_id].lastActivity = r.created_at;
+    }
+  });
+
+  allUsers = Object.values(userMap).sort((a,b)=>(b.totalReqs||0) - (a.totalReqs||0));
+  filteredUsers = [...allUsers];
+  renderUsersTable();
+}
+
+function filterUsers(){
+  const q = (document.getElementById('user-search')?.value||'').toLowerCase();
+  const status = document.getElementById('status-filter')?.value || 'all';
+  filteredUsers = allUsers.filter(u=>{
+    const matchQ = !q || u.user_id.includes(q) || (u.email||'').includes(q) || (u.name||'').toLowerCase().includes(q);
+    const matchS =
+      status==='all' ? true :
+      status==='active' ? isActive(u.lastReq) :
+      status==='inactive' ? !isActive(u.lastReq) :
+      status==='pro' ? u.plan==='pro' : true;
+    return matchQ && matchS;
+  });
+  currentPage = 1;
+  renderUsersTable();
+}
+
+function setPeriod(p, btn){
+  userPeriod = p;
+  document.querySelectorAll('#page-users .pd-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  loadUsers();
+}
+
+function renderUsersTable(){
+  const el = document.getElementById('users-table-body');
+  if(!filteredUsers.length){ el.innerHTML='<div class="empty-state"><div class="empty-icon">👥</div>No users found</div>'; return; }
+  const total = filteredUsers.length;
+  const start = (currentPage-1)*PER_PAGE;
+  const page  = filteredUsers.slice(start, start+PER_PAGE);
+
+  let html = `<table><thead><tr>
+    <th onclick="sortUsers('name')">User</th>
+    <th onclick="sortUsers('totalReqs')">Requests</th>
+    <th onclick="sortUsers('savedPrompts')">Saved</th>
+    <th onclick="sortUsers('firstReq')">First Activity</th>
+    <th onclick="sortUsers('lastReq')">Last Activity</th>
+    <th>Status</th>
+    <th>Actions</th>
+  </tr></thead><tbody>`;
+
+  page.forEach(u=>{
+    const active = isActive(u.lastReq);
+    const statusBadge = active
+      ? `<span class="badge active">Active</span>`
+      : `<span class="badge inactive">Inactive</span>`;
+    const planBadge = u.plan==='pro'
+      ? `<span class="badge pro" style="margin-left:4px">Pro</span>` : '';
+    const nm = u.name || u.email?.split('@')[0] || u.user_id.slice(0,8)+'…';
+    html += `<tr class="user-row" onclick="openDetail('${u.user_id}')">
+      <td><div class="user-cell">
+        <div class="user-avatar">${initials(u.name, u.email)}</div>
+        <div><div class="user-name">${nm}${planBadge}</div><div class="user-email">${u.email||u.user_id.slice(0,16)+'…'}</div></div>
+      </div></td>
+      <td><strong>${u.totalReqs||0}</strong></td>
+      <td>${u.savedPrompts||0}</td>
+      <td>${fmtDate(u.firstReq)}</td>
+      <td>${fmtRelative(u.lastReq||u.lastActivity)}</td>
+      <td>${statusBadge}</td>
+      <td class="actions-cell" onclick="event.stopPropagation()">
+        <button onclick="openDetail('${u.user_id}')">View</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+
+  // Pagination
+  const pg = document.getElementById('users-pagination');
+  const totalPages = Math.ceil(total/PER_PAGE);
+  pg.innerHTML = `
+    <span class="pg-info">${start+1}–${Math.min(start+PER_PAGE,total)} of ${total}</span>
+    <button class="pg-btn" onclick="goPage(${currentPage-1})" ${currentPage<=1?'disabled':''}>‹ Prev</button>
+    <button class="pg-btn" onclick="goPage(${currentPage+1})" ${currentPage>=totalPages?'disabled':''}>Next ›</button>
+  `;
+}
+
+let sortCol='totalReqs', sortDir=-1;
+function sortUsers(col){
+  if(sortCol===col) sortDir*=-1; else { sortCol=col; sortDir=-1; }
+  filteredUsers.sort((a,b)=>{
+    const av=a[col]||0, bv=b[col]||0;
+    if(typeof av==='string') return sortDir*av.localeCompare(bv);
+    return sortDir*(av-bv);
+  });
+  renderUsersTable();
+}
+function goPage(p){ currentPage=p; renderUsersTable(); window.scrollTo(0,0); }
+
+// ══════════════════════════════════════════════════════
+// USER DETAIL
+// ══════════════════════════════════════════════════════
+async function openDetail(userId){
+  document.getElementById('detail-overlay').classList.add('open');
+  const u = allUsers.find(x=>x.user_id===userId);
+  const nm = u?.name || u?.email?.split('@')[0] || userId.slice(0,8);
+  document.getElementById('dp-avatar').textContent = initials(u?.name, u?.email);
+  document.getElementById('dp-name').textContent = nm;
+  document.getElementById('dp-email').textContent = u?.email || userId;
+
+  const body = document.getElementById('dp-body');
+  body.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+
+  // Fetch user-specific data (safe — tables may not exist yet)
+  const [sessRes, reqRes, errRes] = await Promise.all([
+    Promise.resolve(SB.from('nira_sessions').select('*').eq('user_id',userId).order('session_start',{ascending:false}).limit(20)).catch(()=>({data:[]})),
+    Promise.resolve(SB.from('nira_requests').select('*').eq('user_id',userId).order('created_at',{ascending:false}).limit(50)).catch(()=>({data:[]})),
+    Promise.resolve(SB.from('nira_errors').select('*').eq('user_id',userId).order('created_at',{ascending:false}).limit(20)).catch(()=>({data:[]}))
+  ]);
+
+  const sessions = sessRes.data || [];
+  const requests = reqRes.data || [];
+  const errors   = errRes.data || [];
+
+  const totalSecs = sessions.filter(s=>!s.is_active).reduce((a,s)=>a+(s.duration_seconds||0),0);
+  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.filter(s=>!s.is_active).length) : 0;
+
+  body.innerHTML = `
+    <div class="dp-section">
+      <div class="dp-section-title">Registration Info</div>
+      <div class="dp-grid">
+        <div class="dp-stat"><div class="lbl">Email</div><div class="val" style="font-size:12px;word-break:break-all">${u?.email||userId}</div></div>
+        <div class="dp-stat"><div class="lbl">Registered</div><div class="val" style="font-size:13px">${fmtDate(u?.registeredAt)}</div></div>
+        <div class="dp-stat"><div class="lbl">Last Login</div><div class="val" style="font-size:13px">${fmtRelative(u?.lastLogin)}</div></div>
+        <div class="dp-stat"><div class="lbl">First Activity</div><div class="val" style="font-size:13px">${fmtDate(u?.firstReq)}</div></div>
+        <div class="dp-stat"><div class="lbl">Last Activity</div><div class="val" style="font-size:13px">${fmtRelative(u?.lastReq||u?.lastActivity)}</div></div>
+        <div class="dp-stat"><div class="lbl">Total Requests</div><div class="val">${u?.totalReqs||0}</div><div class="sub">from usage_daily</div></div>
+      </div>
+    </div>
+
+    <div class="dp-section">
+      <div class="dp-section-title">Time Tracking</div>
+      ${sessions.length===0 ? '<div class="info-box">No session data yet — deploy tracking code to record future sessions.</div>' : ''}
+      <div class="dp-grid">
+        <div class="dp-stat"><div class="lbl">Total Sessions</div><div class="val">${sessions.length}</div></div>
+        <div class="dp-stat"><div class="lbl">Total Time</div><div class="val">${fmtDur(totalSecs)}</div></div>
+        <div class="dp-stat"><div class="lbl">Avg Session</div><div class="val">${fmtDur(avgSecs)}</div></div>
+        <div class="dp-stat"><div class="lbl">AI Requests</div><div class="val">${requests.length}</div><div class="sub">tracked requests</div></div>
+      </div>
+    </div>
+
+    ${sessions.length>0 ? `
+    <div class="dp-section">
+      <div class="dp-section-title">Session History</div>
+      <div class="session-list">
+        ${sessions.slice(0,10).map(s=>`
+          <div class="session-item">
+            <div class="si-date">${fmtDate(s.session_start)}</div>
+            <div class="si-dur">${s.is_active ? '🟢 Active' : fmtDur(s.duration_seconds)}</div>
+            <div class="si-time">${fmtDateTime(s.session_start)} → ${s.session_end?fmtDateTime(s.session_end):'ongoing'}</div>
+            <div class="si-reqs">${s.request_count||0} requests</div>
+            ${(s.tools_used||[]).length ? `<div class="si-tools">${s.tools_used.map(t=>`<span class="si-tool">${t}</span>`).join('')}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
+    ${requests.length>0 ? `
+    <div class="dp-section">
+      <div class="dp-section-title">Recent AI Requests</div>
+      <div class="req-list">
+        ${requests.slice(0,30).map(r=>`
+          <div class="req-item">
+            <span class="req-tool">${r.tool||'general'}</span>
+            <span class="req-time">${fmtDateTime(r.created_at)}</span>
+            ${r.duration_ms ? `<span style="font-size:11px;color:var(--muted)">${r.duration_ms}ms</span>` : ''}
+            <span class="${r.success===false?'req-err':'req-ok'}">${r.success===false?'✗':'✓'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
+    ${errors.length>0 ? `
+    <div class="dp-section">
+      <div class="dp-section-title">Errors (${errors.length})</div>
+      ${errors.slice(0,10).map(e=>`
+        <div style="background:rgba(224,85,85,.07);border:1px solid rgba(224,85,85,.2);border-radius:7px;padding:10px 12px;margin-bottom:7px">
+          <div style="font-size:12px;font-weight:600;color:#e88">${e.error_type||'error'} · ${fmtDateTime(e.created_at)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${e.error_msg||'—'}</div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+  `;
+}
+
+function closeDetail(e){ if(e.target===document.getElementById('detail-overlay')) closeDetailPanel(); }
+function closeDetailPanel(){ document.getElementById('detail-overlay').classList.remove('open'); }
+
+// ══════════════════════════════════════════════════════
+// USAGE ANALYTICS
+// ══════════════════════════════════════════════════════
+async function loadUsageAnalytics(){
+  const el = document.getElementById('usage-cards');
+  el.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+
+  const now = new Date();
+  const dayAgo   = new Date(now-86400000).toISOString().split('T')[0];
+  const weekAgo  = new Date(now-7*86400000).toISOString().split('T')[0];
+  const monthAgo = new Date(now-30*86400000).toISOString().split('T')[0];
+  const today    = now.toISOString().split('T')[0];
+
+  const from = usagePeriod==='day' ? dayAgo : usagePeriod==='week' ? weekAgo : monthAgo;
+
+  const { data } = await SB.from('usage_daily').select('*').gte('date',from).lte('date',today).order('date');
+  if(!data){ el.innerHTML='<div class="empty-state">No data</div>'; return; }
+
+  const totalReqs = data.reduce((a,r)=>a+(r.usage_count||0),0);
+  const uniqueUsers = new Set(data.map(r=>r.user_id)).size;
+  const avgPerUser  = uniqueUsers ? Math.round(totalReqs/uniqueUsers) : 0;
+  const peakDay     = data.reduce((a,r)=>(!a||r.usage_count>a.usage_count)?r:a, null);
+
+  el.innerHTML = `
+    <div class="card gold"><div class="card-icon">⚡</div><div class="card-label">Total Requests</div><div class="card-val">${totalReqs.toLocaleString()}</div><div class="card-sub">${usagePeriod==='day'?'today':usagePeriod==='week'?'last 7 days':'last 30 days'}</div></div>
+    <div class="card green"><div class="card-icon">👥</div><div class="card-label">Active Users</div><div class="card-val">${uniqueUsers}</div><div class="card-sub">unique users with requests</div></div>
+    <div class="card blue"><div class="card-icon">📈</div><div class="card-label">Avg per User</div><div class="card-val">${avgPerUser}</div><div class="card-sub">requests per active user</div></div>
+    <div class="card purple"><div class="card-icon">🏆</div><div class="card-label">Peak Day</div><div class="card-val" style="font-size:18px">${peakDay?fmtDate(peakDay.date):'—'}</div><div class="card-sub">${peakDay?(peakDay.usage_count+' requests'):'no data'}</div></div>
+  `;
+
+  // Daily chart
+  const byDate = {};
+  data.forEach(r=>{ byDate[r.date]=(byDate[r.date]||0)+(r.usage_count||0); });
+  const dLabels = Object.keys(byDate).sort();
+  const dVals   = dLabels.map(d=>byDate[d]);
+  makeChart('chart-usage-daily','bar',dLabels,[{
+    label:'Requests',data:dVals,
+    backgroundColor:'rgba(201,168,76,.7)',borderColor:'#c9a84c',borderWidth:1
+  }],{ scales:{x:{ticks:{maxTicksLimit:10}},y:{beginAtZero:true}} });
+
+  // Top users
+  const userTotals = {};
+  data.forEach(r=>{ userTotals[r.user_id]=(userTotals[r.user_id]||0)+(r.usage_count||0); });
+  const top10 = Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  makeChart('chart-top-users','bar',
+    top10.map(([id])=>id.slice(0,8)+'…'),
+    [{label:'Requests',data:top10.map(([,v])=>v),backgroundColor:'rgba(155,89,182,.7)',borderColor:'#9b59b6',borderWidth:1}],
+    { indexAxis:'y', scales:{x:{beginAtZero:true}} }
+  );
+
+  // Rankings table
+  const rkEl = document.getElementById('rankings-table');
+  rkEl.innerHTML = `<table><thead><tr><th>#</th><th>User ID</th><th>Requests</th><th>Days Active</th></tr></thead><tbody>
+    ${Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([uid,cnt],i)=>{
+      const daysActive = new Set(data.filter(r=>r.user_id===uid).map(r=>r.date)).size;
+      return `<tr><td style="color:var(--gold);font-weight:700">#${i+1}</td><td style="font-family:monospace;font-size:11px">${uid}</td><td><strong>${cnt}</strong></td><td>${daysActive}</td></tr>`;
+    }).join('')}
+  </tbody></table>`;
+
+  // Hour breakdown — from nira_requests if available
+  const { data: reqData } = await Promise.resolve(SB.from('nira_requests').select('created_at').gte('created_at',from+'T00:00:00Z').limit(5000)).catch(()=>({data:null}));
+  if(reqData && reqData.length > 0){
+    const hours = Array(24).fill(0);
+    reqData.forEach(r=>{ if(r.created_at) hours[new Date(r.created_at).getHours()]++; });
+    makeChart('chart-by-hour','bar',
+      Array.from({length:24},(_,i)=>i+':00'),
+      [{label:'Requests',data:hours,backgroundColor:'rgba(74,144,226,.7)',borderColor:'#4a90e2',borderWidth:1}],
+      { scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true}} }
+    );
+  } else {
+    document.getElementById('chart-by-hour').parentElement.innerHTML += '<div style="text-align:center;font-size:11px;color:var(--muted);padding:8px">Hour breakdown available after tracking deployment</div>';
+  }
+}
+
+function setUsagePeriod(p,btn){
+  usagePeriod=p;
+  document.querySelectorAll('#page-usage .pd-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  loadUsageAnalytics();
+}
+
+// ══════════════════════════════════════════════════════
+// SESSIONS / TIME TRACKING
+// ══════════════════════════════════════════════════════
+async function loadSessionsAnalytics(){
+  const el = document.getElementById('session-cards');
+  el.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
+
+  const { data: sessions } = await Promise.resolve(SB.from('nira_sessions').select('*').eq('is_active',false).order('session_start',{ascending:false}).limit(500)).catch(()=>({data:null}));
+
+  if(!sessions || !sessions.length){
+    el.innerHTML = `
+      <div class="card gold" style="grid-column:1/-1">
+        <div class="card-label">Session Data</div>
+        <div class="card-val" style="font-size:14px;color:var(--muted)">No sessions recorded yet</div>
+        <div class="card-sub">Deploy the tracking code to start recording session durations</div>
+      </div>`;
+    document.getElementById('sessions-table').innerHTML = '<div class="empty-state"><div class="empty-icon">⏱️</div><p>Sessions will appear here after tracking code is deployed</p></div>';
+    return;
+  }
+
+  const totalSecs = sessions.reduce((a,s)=>a+(s.duration_seconds||0),0);
+  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.length) : 0;
+  const uniqueUsers = new Set(sessions.map(s=>s.user_id)).size;
+
+  el.innerHTML = `
+    <div class="card gold"><div class="card-icon">⏱️</div><div class="card-label">Total Sessions</div><div class="card-val">${sessions.length}</div></div>
+    <div class="card green"><div class="card-icon">⌚</div><div class="card-label">Total Time</div><div class="card-val" style="font-size:18px">${fmtDur(totalSecs)}</div><div class="card-sub">across all users</div></div>
+    <div class="card blue"><div class="card-icon">📊</div><div class="card-label">Avg Session</div><div class="card-val" style="font-size:18px">${fmtDur(avgSecs)}</div></div>
+    <div class="card purple"><div class="card-icon">👥</div><div class="card-label">Users Tracked</div><div class="card-val">${uniqueUsers}</div></div>
+  `;
+
+  // Duration distribution
+  const buckets = {'<1m':0,'1-5m':0,'5-15m':0,'15-30m':0,'>30m':0};
+  sessions.forEach(s=>{
+    const m=(s.duration_seconds||0)/60;
+    if(m<1) buckets['<1m']++;
+    else if(m<5) buckets['1-5m']++;
+    else if(m<15) buckets['5-15m']++;
+    else if(m<30) buckets['15-30m']++;
+    else buckets['>30m']++;
+  });
+  makeChart('chart-session-dist','doughnut',Object.keys(buckets),[{data:Object.values(buckets),backgroundColor:['#4a90e2','#3ecf8e','#c9a84c','#9b59b6','#e05555']}],
+    {plugins:{legend:{position:'right'}}});
+
+  // Top users by time
+  const userTime = {};
+  sessions.forEach(s=>{ userTime[s.user_id]=(userTime[s.user_id]||0)+(s.duration_seconds||0); });
+  const topByTime = Object.entries(userTime).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  makeChart('chart-time-users','bar',
+    topByTime.map(([id])=>id.slice(0,8)+'…'),
+    [{label:'Minutes',data:topByTime.map(([,s])=>Math.round(s/60)),backgroundColor:'rgba(62,207,142,.7)',borderColor:'#3ecf8e',borderWidth:1}],
+    {indexAxis:'y',scales:{x:{beginAtZero:true}}}
+  );
+
+  // Sessions table
+  const tEl = document.getElementById('sessions-table');
+  tEl.innerHTML = `<table><thead><tr>
+    <th>User</th><th>Start</th><th>End</th><th>Duration</th><th>Requests</th><th>Tools</th>
+  </tr></thead><tbody>
+  ${sessions.slice(0,50).map(s=>`
+    <tr>
+      <td style="font-family:monospace;font-size:11px">${s.user_id.slice(0,12)}…</td>
+      <td>${fmtDateTime(s.session_start)}</td>
+      <td>${s.session_end?fmtDateTime(s.session_end):'—'}</td>
+      <td><strong style="color:var(--gold)">${fmtDur(s.duration_seconds)}</strong></td>
+      <td>${s.request_count||0}</td>
+      <td>${(s.tools_used||[]).slice(0,3).map(t=>`<span class="si-tool">${t}</span>`).join(' ')}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ERRORS
+// ══════════════════════════════════════════════════════
+async function loadErrors(){
+  const { data } = await Promise.resolve(SB.from('nira_errors').select('*').order('created_at',{ascending:false}).limit(200)).catch(()=>({data:null}));
+  const el = document.getElementById('error-cards');
+  const tEl = document.getElementById('errors-table');
+
+  if(!data || !data.length){
+    el.innerHTML = '<div class="card green" style="grid-column:1/-1"><div class="card-label">Errors</div><div class="card-val" style="color:var(--green)">✓ None recorded</div></div>';
+    tEl.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No errors yet — great!</p></div>';
+    return;
+  }
+
+  const byType = {};
+  data.forEach(e=>{ byType[e.error_type||'unknown']=(byType[e.error_type||'unknown']||0)+1; });
+
+  el.innerHTML = `
+    <div class="card red"><div class="card-icon">⚠️</div><div class="card-label">Total Errors</div><div class="card-val">${data.length}</div></div>
+    ${Object.entries(byType).map(([t,c])=>`<div class="card"><div class="card-label">${t}</div><div class="card-val">${c}</div></div>`).join('')}
+  `;
+
+  tEl.innerHTML = `<table><thead><tr><th>Time</th><th>Type</th><th>Tool</th><th>User</th><th>Message</th></tr></thead><tbody>
+    ${data.map(e=>`<tr>
+      <td>${fmtDateTime(e.created_at)}</td>
+      <td><span class="badge" style="background:rgba(224,85,85,.1);border:1px solid rgba(224,85,85,.25);color:#e88">${e.error_type||'error'}</span></td>
+      <td>${e.tool||'—'}</td>
+      <td style="font-family:monospace;font-size:10px">${e.user_id?e.user_id.slice(0,12)+'…':'anon'}</td>
+      <td style="color:var(--muted);font-size:11px">${(e.error_msg||'').slice(0,80)}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+// ══════════════════════════════════════════════════════
+// CSV EXPORT
+// ══════════════════════════════════════════════════════
+function exportCSV(){
+  const rows = [['user_id','total_requests','saved_prompts','first_activity','last_activity']];
+  filteredUsers.forEach(u=>rows.push([u.user_id,u.totalReqs||0,u.savedPrompts||0,u.firstReq||'',u.lastReq||'']));
+  const csv = rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = 'nira-users-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+}
+
+function exportSessions(){
+  Promise.resolve(SB.from('nira_sessions').select('*').eq('is_active',false)).catch(()=>({data:null})).then(({data})=>{
+    if(!data) return;
+    const rows=[['user_id','session_start','session_end','duration_seconds','request_count','tools_used']];
+    data.forEach(s=>rows.push([s.user_id,s.session_start,s.session_end||'',s.duration_seconds||'',s.request_count||'',(s.tools_used||[]).join(';')]));
+    const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='nira-sessions-'+new Date().toISOString().split('T')[0]+'.csv';
+    a.click();
+  });
+}
+
+// Keyboard: Escape closes detail
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetailPanel(); });
+</script>
+</body>
+</html>
