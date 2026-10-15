@@ -283,9 +283,10 @@ tr:last-child td{border-bottom:none}
       <div class="page" id="page-usage">
         <div class="date-row">
           <div class="period-btns">
-            <button class="pd-btn" onclick="setUsagePeriod('day',this)">Today</button>
-            <button class="pd-btn active" onclick="setUsagePeriod('week',this)">This Week</button>
+            <button class="pd-btn active" onclick="setUsagePeriod('all',this)">All Time</button>
             <button class="pd-btn" onclick="setUsagePeriod('month',this)">This Month</button>
+            <button class="pd-btn" onclick="setUsagePeriod('week',this)">This Week</button>
+            <button class="pd-btn" onclick="setUsagePeriod('day',this)">Today</button>
           </div>
         </div>
         <div class="cards-grid" id="usage-cards"></div>
@@ -362,7 +363,7 @@ const ADMIN_EMAILS = [
 const SB = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ══ State ══
-let allUsers = [], filteredUsers = [], userPeriod = 'all', usagePeriod = 'week';
+let allUsers = [], filteredUsers = [], userPeriod = 'all', usagePeriod = 'all';
 let currentPage = 1; const PER_PAGE = 25;
 let charts = {};
 
@@ -827,9 +828,11 @@ async function loadUsageAnalytics(){
   const monthAgo = new Date(now-30*86400000).toISOString().split('T')[0];
   const today    = now.toISOString().split('T')[0];
 
-  const from = usagePeriod==='day' ? dayAgo : usagePeriod==='week' ? weekAgo : monthAgo;
+  const from = usagePeriod==='day' ? dayAgo : usagePeriod==='week' ? weekAgo : usagePeriod==='month' ? monthAgo : null;
 
-  const { data } = await SB.from('usage_daily').select('*').gte('date',from).lte('date',today).order('date');
+  let q = SB.from('usage_daily').select('*').lte('date',today).order('date');
+  if(from) q = q.gte('date',from);
+  const { data } = await q;
   if(!data){ el.innerHTML='<div class="empty-state">No data</div>'; return; }
 
   const totalReqs = data.reduce((a,r)=>a+(r.usage_count||0),0);
@@ -838,7 +841,7 @@ async function loadUsageAnalytics(){
   const peakDay     = data.reduce((a,r)=>(!a||r.usage_count>a.usage_count)?r:a, null);
 
   el.innerHTML = `
-    <div class="card gold"><div class="card-icon">⚡</div><div class="card-label">Total Requests</div><div class="card-val">${totalReqs.toLocaleString()}</div><div class="card-sub">${usagePeriod==='day'?'today':usagePeriod==='week'?'last 7 days':'last 30 days'}</div></div>
+    <div class="card gold"><div class="card-icon">⚡</div><div class="card-label">Total Requests</div><div class="card-val">${totalReqs.toLocaleString()}</div><div class="card-sub">${usagePeriod==='all'?'all time':usagePeriod==='day'?'today':usagePeriod==='week'?'last 7 days':'last 30 days'}</div></div>
     <div class="card green"><div class="card-icon">👥</div><div class="card-label">Active Users</div><div class="card-val">${uniqueUsers}</div><div class="card-sub">unique users with requests</div></div>
     <div class="card blue"><div class="card-icon">📈</div><div class="card-label">Avg per User</div><div class="card-val">${avgPerUser}</div><div class="card-sub">requests per active user</div></div>
     <div class="card purple"><div class="card-icon">🏆</div><div class="card-label">Peak Day</div><div class="card-val" style="font-size:18px">${peakDay?fmtDate(peakDay.date):'—'}</div><div class="card-sub">${peakDay?(peakDay.usage_count+' requests'):'no data'}</div></div>
@@ -859,17 +862,19 @@ async function loadUsageAnalytics(){
   data.forEach(r=>{ userTotals[r.user_id]=(userTotals[r.user_id]||0)+(r.usage_count||0); });
   const top10 = Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,10);
   makeChart('chart-top-users','bar',
-    top10.map(([id])=>id.slice(0,8)+'…'),
+    top10.map(([id])=>{ const u=allUsers.find(x=>x.user_id===id); return u?.email?.split('@')[0]||id.slice(0,8)+'…'; }),
     [{label:'Requests',data:top10.map(([,v])=>v),backgroundColor:'rgba(155,89,182,.7)',borderColor:'#9b59b6',borderWidth:1}],
     { indexAxis:'y', scales:{x:{beginAtZero:true}} }
   );
 
   // Rankings table
   const rkEl = document.getElementById('rankings-table');
-  rkEl.innerHTML = `<table><thead><tr><th>#</th><th>User ID</th><th>Requests</th><th>Days Active</th></tr></thead><tbody>
+  rkEl.innerHTML = `<table><thead><tr><th>#</th><th>User</th><th>Requests</th><th>Days Active</th></tr></thead><tbody>
     ${Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([uid,cnt],i)=>{
       const daysActive = new Set(data.filter(r=>r.user_id===uid).map(r=>r.date)).size;
-      return `<tr><td style="color:var(--gold);font-weight:700">#${i+1}</td><td style="font-family:monospace;font-size:11px">${uid}</td><td><strong>${cnt}</strong></td><td>${daysActive}</td></tr>`;
+      const u = allUsers.find(x=>x.user_id===uid);
+      const label = u?.email || (u?.name ? u.name : uid.slice(0,12)+'…');
+      return `<tr><td style="color:var(--gold);font-weight:700">#${i+1}</td><td style="font-size:12px">${label}</td><td><strong>${cnt}</strong></td><td>${daysActive}</td></tr>`;
     }).join('')}
   </tbody></table>`;
 
