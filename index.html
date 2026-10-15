@@ -750,7 +750,10 @@ async function openDetail(userId){
   const requests = reqRes.data || [];
   const errors   = errRes.data || [];
 
-  const totalSecs = sessions.filter(s=>!s.is_active).reduce((a,s)=>a+(s.duration_seconds||0),0);
+const totalSecs = knownDurationSessions.reduce(
+  (sum, s) => sum + Number(s.duration_seconds),
+  0
+);
   const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.filter(s=>!s.is_active).length) : 0;
 
   body.innerHTML = `
