@@ -750,12 +750,20 @@ async function openDetail(userId){
   const requests = reqRes.data || [];
   const errors   = errRes.data || [];
 
+const knownDurationSessions = sessions.filter(
+  s => s.duration_seconds != null &&
+       Number.isFinite(Number(s.duration_seconds)) &&
+       Number(s.duration_seconds) >= 0
+);
+
 const totalSecs = knownDurationSessions.reduce(
   (sum, s) => sum + Number(s.duration_seconds),
   0
 );
-  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.filter(s=>!s.is_active).length) : 0;
 
+const avgSecs = knownDurationSessions.length
+  ? Math.round(totalSecs / knownDurationSessions.length)
+  : 0;
   body.innerHTML = `
     <div class="dp-section">
       <div class="dp-section-title">Registration Info</div>
@@ -915,115 +923,230 @@ function setUsagePeriod(p,btn){
 // ══════════════════════════════════════════════════════
 // SESSIONS / TIME TRACKING
 // ══════════════════════════════════════════════════════
-async function loadSessionsAnalytics(){
+async function loadSessionsAnalytics() {
   const el = document.getElementById('session-cards');
   el.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
 
-const { data: sessions, error } = await SB
-  .from('nira_sessions')
-  .select(`
-    id,
-    user_id,
-    session_start,
-    last_activity,
-    session_end,
-    duration_seconds,
-    request_count,
-    tools_used,
-    is_active,
-    inactivity_timeout
-  `)
-  .order('session_start', { ascending: false })
-  .limit(500);
+  const { data: sessions, error } = await SB
+    .from('nira_sessions')
+    .select(`
+      id,
+      user_id,
+      session_start,
+      last_activity,
+      session_end,
+      duration_seconds,
+      request_count,
+      tools_used,
+      is_active,
+      inactivity_timeout
+    `)
+    .order('session_start', { ascending: false })
+    .limit(500);
 
-if (error) {
-  el.innerHTML = `
-    <div class="warning-box">
-      Unable to load sessions: ${escapeHTML(error.message)}
-    </div>`;
-  return;
-}
-
-const allSessions = sessions || [];
-
-const knownDurationSessions = allSessions.filter(
-  s => s.duration_seconds != null && s.duration_seconds > 0
-);
-
-const missingDurationSessions = allSessions.filter(
-  s => s.duration_seconds == null
-);
-
-const totalSecs = knownDurationSessions.reduce(
-  (sum, s) => sum + s.duration_seconds,
-  0
-);
-
-const uniqueUsers = new Set(
-  allSessions.map(s => s.user_id)
-).size;
-  if(!sessions || !sessions.length){
+  if (error) {
     el.innerHTML = `
-      <div class="card gold" style="grid-column:1/-1">
-        <div class="card-label">Session Data</div>
-        <div class="card-val" style="font-size:14px;color:var(--muted)">No sessions recorded yet</div>
-        <div class="card-sub">Deploy the tracking code to start recording session durations</div>
+      <div class="warning-box">
+        Unable to load sessions: ${escapeHTML(error.message)}
       </div>`;
-    document.getElementById('sessions-table').innerHTML = '<div class="empty-state"><div class="empty-icon">⏱️</div><p>Sessions will appear here after tracking code is deployed</p></div>';
     return;
   }
 
-const totalSecs = knownDurationSessions.reduce(
-  (sum, s) => sum + Number(s.duration_seconds),
-  0
-);  const avgSecs   = sessions.length ? Math.round(totalSecs/sessions.length) : 0;
-  const uniqueUsers = new Set(sessions.map(s=>s.user_id)).size;
+  const allSessions = sessions || [];
 
-  el.innerHTML = `
-    <div class="card gold"><div class="card-icon">⏱️</div><div class="card-label">Total Sessions</div><div class="card-val">${sessions.length}</div></div>
-    <div class="card green"><div class="card-icon">⌚</div><div class="card-label">Total Time</div><div class="card-val" style="font-size:18px">${fmtDur(totalSecs)}</div><div class="card-sub">across all users</div></div>
-    <div class="card blue"><div class="card-icon">📊</div><div class="card-label">Avg Session</div><div class="card-val" style="font-size:18px">${fmtDur(avgSecs)}</div></div>
-    <div class="card purple"><div class="card-icon">👥</div><div class="card-label">Users Tracked</div><div class="card-val">${uniqueUsers}</div></div>
-  `;
+  if (!allSessions.length) {
+    el.innerHTML = `
+      <div class="card gold" style="grid-column:1/-1">
+        <div class="card-label">Session Data</div>
+        <div class="card-val" style="font-size:14px;color:var(--muted)">
+          No sessions recorded yet
+        </div>
+        <div class="card-sub">
+          Deploy the tracking code to record session durations.
+        </div>
+      </div>`;
 
-  // Duration distribution
-  const buckets = {'<1m':0,'1-5m':0,'5-15m':0,'15-30m':0,'>30m':0};
-  sessions.forEach(s=>{
-    const m=(s.duration_seconds||0)/60;
-    if(m<1) buckets['<1m']++;
-    else if(m<5) buckets['1-5m']++;
-    else if(m<15) buckets['5-15m']++;
-    else if(m<30) buckets['15-30m']++;
-    else buckets['>30m']++;
-  });
-  makeChart('chart-session-dist','doughnut',Object.keys(buckets),[{data:Object.values(buckets),backgroundColor:['#4a90e2','#3ecf8e','#c9a84c','#9b59b6','#e05555']}],
-    {plugins:{legend:{position:'right'}}});
+    document.getElementById('sessions-table').innerHTML =
+      '<div class="empty-state">No sessions recorded yet.</div>';
 
-  // Top users by time
-  const userTime = {};
-  sessions.forEach(s=>{ userTime[s.user_id]=(userTime[s.user_id]||0)+(s.duration_seconds||0); });
-  const topByTime = Object.entries(userTime).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  makeChart('chart-time-users','bar',
-    topByTime.map(([id])=>id.slice(0,8)+'…'),
-    [{label:'Minutes',data:topByTime.map(([,s])=>Math.round(s/60)),backgroundColor:'rgba(62,207,142,.7)',borderColor:'#3ecf8e',borderWidth:1}],
-    {indexAxis:'y',scales:{x:{beginAtZero:true}}}
+    return;
+  }
+
+  // Use only recorded durations for time calculations.
+  const knownDurationSessions = allSessions.filter(
+    s => s.duration_seconds != null &&
+         Number.isFinite(Number(s.duration_seconds)) &&
+         Number(s.duration_seconds) >= 0
   );
 
-  // Sessions table
+  const missingDurationSessions = allSessions.filter(
+    s => s.duration_seconds == null
+  );
+
+  const totalSecs = knownDurationSessions.reduce(
+    (sum, s) => sum + Number(s.duration_seconds),
+    0
+  );
+
+  const avgSecs = knownDurationSessions.length
+    ? Math.round(totalSecs / knownDurationSessions.length)
+    : 0;
+
+  const uniqueUsers = new Set(
+    allSessions.map(s => s.user_id).filter(Boolean)
+  ).size;
+
+  el.innerHTML = `
+    <div class="card gold">
+      <div class="card-icon">⏱️</div>
+      <div class="card-label">Total Sessions</div>
+      <div class="card-val">${allSessions.length}</div>
+    </div>
+
+    <div class="card green">
+      <div class="card-icon">⌚</div>
+      <div class="card-label">Total Recorded Time</div>
+      <div class="card-val" style="font-size:18px">
+        ${fmtDur(totalSecs)}
+      </div>
+      <div class="card-sub">Only sessions with recorded durations</div>
+    </div>
+
+    <div class="card blue">
+      <div class="card-icon">📊</div>
+      <div class="card-label">Average Session</div>
+      <div class="card-val" style="font-size:18px">
+        ${knownDurationSessions.length ? fmtDur(avgSecs) : '—'}
+      </div>
+      <div class="card-sub">
+        ${knownDurationSessions.length} sessions with recorded durations
+      </div>
+    </div>
+
+    <div class="card purple">
+      <div class="card-icon">👥</div>
+      <div class="card-label">Users Tracked</div>
+      <div class="card-val">${uniqueUsers}</div>
+    </div>
+
+    <div class="card red">
+      <div class="card-icon">❔</div>
+      <div class="card-label">Missing Durations</div>
+      <div class="card-val">${missingDurationSessions.length}</div>
+      <div class="card-sub">Duration not recorded</div>
+    </div>
+  `;
+
+  // Duration distribution: exclude sessions with unknown durations.
+  const buckets = {
+    '<1m': 0,
+    '1-5m': 0,
+    '5-15m': 0,
+    '15-30m': 0,
+    '>30m': 0
+  };
+
+  knownDurationSessions.forEach(s => {
+    const minutes = Number(s.duration_seconds) / 60;
+
+    if (minutes < 1) buckets['<1m']++;
+    else if (minutes < 5) buckets['1-5m']++;
+    else if (minutes < 15) buckets['5-15m']++;
+    else if (minutes < 30) buckets['15-30m']++;
+    else buckets['>30m']++;
+  });
+
+  makeChart(
+    'chart-session-dist',
+    'doughnut',
+    Object.keys(buckets),
+    [{
+      data: Object.values(buckets),
+      backgroundColor: [
+        '#4a90e2',
+        '#3ecf8e',
+        '#c9a84c',
+        '#9b59b6',
+        '#e05555'
+      ]
+    }],
+    { plugins: { legend: { position: 'right' } } }
+  );
+
+  // Top users by recorded time.
+  const userTime = {};
+
+  knownDurationSessions.forEach(s => {
+    if (!s.user_id) return;
+
+    userTime[s.user_id] =
+      (userTime[s.user_id] || 0) + Number(s.duration_seconds);
+  });
+
+  const topByTime = Object.entries(userTime)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+
+  makeChart(
+    'chart-time-users',
+    'bar',
+    topByTime.map(([id]) => id.slice(0, 8) + '…'),
+    [{
+      label: 'Minutes',
+      data: topByTime.map(([, seconds]) =>
+        Math.round(seconds / 60)
+      ),
+      backgroundColor: 'rgba(62,207,142,.7)',
+      borderColor: '#3ecf8e',
+      borderWidth: 1
+    }],
+    {
+      indexAxis: 'y',
+      scales: { x: { beginAtZero: true } }
+    }
+  );
+
+  // Recent sessions table: include active and inactive sessions.
   const tEl = document.getElementById('sessions-table');
-  tEl.innerHTML = `<table><thead><tr>
-    <th>User</th><th>Start</th><th>End</th><th>Duration</th><th>Requests</th><th>Tools</th>
-  </tr></thead><tbody>
-  ${sessions.slice(0,50).map(s=>`
-    <tr>
-      <td style="font-family:monospace;font-size:11px">${s.user_id.slice(0,12)}…</td>
-      <td>${fmtDateTime(s.session_start)}</td>
-      <td>${s.session_end?fmtDateTime(s.session_end):'—'}</td>
-      <td><strong style="color:var(--gold)">${fmtDur(s.duration_seconds)}</strong></td>
-      <td>${s.request_count||0}</td>
-      <td>${(s.tools_used||[]).slice(0,3).map(t=>`<span class="si-tool">${t}</span>`).join(' ')}</td>
-    </tr>`).join('')}
-  </tbody></table>`;
+
+  tEl.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Duration</th>
+          <th>Requests</th>
+          <th>Tools</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allSessions.slice(0, 50).map(s => `
+          <tr>
+            <td style="font-family:monospace;font-size:11px">
+              ${escapeHTML((s.user_id || '').slice(0, 12))}…
+            </td>
+            <td>${fmtDateTime(s.session_start)}</td>
+            <td>${s.session_end ? fmtDateTime(s.session_end) : '—'}</td>
+            <td>
+              <strong style="color:var(--gold)">
+                ${s.duration_seconds == null
+                  ? 'Not recorded'
+                  : fmtDur(Number(s.duration_seconds))}
+              </strong>
+            </td>
+            <td>${Number(s.request_count) || 0}</td>
+            <td>
+              ${(Array.isArray(s.tools_used) ? s.tools_used : [])
+                .slice(0, 3)
+                .map(t => `<span class="si-tool">${escapeHTML(t)}</span>`)
+                .join(' ')}
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
 }
 
 // ══════════════════════════════════════════════════════
