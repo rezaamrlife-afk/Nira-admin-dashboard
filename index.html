@@ -505,44 +505,47 @@ function makeChart(id, type, labels, datasets, options={}){
 // OVERVIEW
 // ══════════════════════════════════════════════════════
 async function loadOverview(){
-  // Fetch counts in parallel
-  const [savedRes, usageDailyRes, profilesRes] = await Promise.all([
+  const thirtyDaysAgo30iso = new Date(Date.now()-30*86400000).toISOString();
+
+  // Fetch in parallel — nira_requests is primary source, usage_daily kept as fallback/historical
+  const [savedRes, profilesRes, niraReqRes, niraReqCountRes] = await Promise.all([
     SB.from('saved_prompts').select('id', {count:'exact',head:true}),
-    SB.from('usage_daily').select('user_id,usage_count,date'),
-    SB.from('user_profiles').select('id,email,created_at,last_sign_in_at,full_name')
+    SB.from('user_profiles').select('id,email,created_at,last_sign_in_at,full_name'),
+    // Recent requests for active user detection (30d)
+    Promise.resolve(SB.from('nira_requests').select('user_id,created_at').gte('created_at', thirtyDaysAgo30iso).limit(5000)).catch(()=>({data:null})),
+    // Total request count (all time) — count only
+    Promise.resolve(SB.from('nira_requests').select('id', {count:'exact',head:true})).catch(()=>({count:null}))
   ]);
 
-  const thirtyDaysAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
-  const sevenDaysAgo  = new Date(Date.now()-7*86400000).toISOString().split('T')[0];
-
-  // Total registered users from user_profiles
+  // Total registered users
   const totalUsers = profilesRes.data?.length || 0;
 
-  // Requests (30d) from usage_daily
-  const recent30 = usageDailyRes.data?.filter(r=>r.date >= thirtyDaysAgo) || [];
-  const totalReq30d = recent30.reduce((a,b)=>a+(b.usage_count||0),0);
+  // Requests (30d) — from nira_requests
+  const recentReqs = niraReqRes.data || [];
+  const totalReq30d = recentReqs.length;
 
-  // Active in last 30d — combine usage_daily + last_sign_in_at + nira_requests
-  const active30ud = usageDailyRes.data?.filter(r=>r.date >= thirtyDaysAgo) || [];
-  const activeSet = new Set(active30ud.map(r=>r.user_id));
-  // Add users who logged in recently (last_sign_in_at)
+  // Active in last 30d — nira_requests + last_sign_in_at (no usage_daily)
+  const activeSet = new Set(recentReqs.map(r=>r.user_id));
   (profilesRes.data||[]).forEach(p=>{
-    if(p.last_sign_in_at && p.last_sign_in_at >= new Date(Date.now()-30*86400000).toISOString())
+    if(p.last_sign_in_at && p.last_sign_in_at >= thirtyDaysAgo30iso)
       activeSet.add(p.id);
   });
-  // Also check nira_requests
-  try {
-    const { data: recentReqs } = await SB.from('nira_requests').select('user_id').gte('created_at', new Date(Date.now()-30*86400000).toISOString()).limit(1000);
-    if(recentReqs?.length) recentReqs.forEach(r=>activeSet.add(r.user_id));
-  } catch(e) {}
-  let active7count = activeSet.size;
+  const activeCount = activeSet.size;
+
+  // Total requests all time — from nira_requests count, fallback to usage_daily sum
+  let totalReqAllTime = niraReqCountRes.count;
+  if(totalReqAllTime === null){
+    // fallback: usage_daily historical total
+    const { data: udAll } = await SB.from('usage_daily').select('usage_count');
+    totalReqAllTime = (udAll||[]).reduce((a,r)=>a+(r.usage_count||0),0);
+  }
 
   const el = document.getElementById('overview-cards');
   el.innerHTML = `
     <div class="card gold"><div class="card-icon">👥</div><div class="card-label">Total Users</div><div class="card-val">${totalUsers}</div><div class="card-sub">registered accounts</div></div>
-    <div class="card green"><div class="card-icon">⚡</div><div class="card-label">Requests (30 days)</div><div class="card-val">${totalReq30d.toLocaleString()}</div><div class="card-sub">from usage_daily</div></div>
+    <div class="card green"><div class="card-icon">⚡</div><div class="card-label">Requests (30d)</div><div class="card-val">${totalReq30d.toLocaleString()}</div><div class="card-sub">from nira_requests</div></div>
     <div class="card blue"><div class="card-icon">💾</div><div class="card-label">Saved Prompts</div><div class="card-val">${(savedRes.count||0).toLocaleString()}</div><div class="card-sub">total in library</div></div>
-    <div class="card purple"><div class="card-icon">📅</div><div class="card-label">Active Users (30d)</div><div class="card-val">${active7count}</div><div class="card-sub">logged in or used app in 30 days</div></div>
+    <div class="card purple"><div class="card-icon">📅</div><div class="card-label">Active Users (30d)</div><div class="card-val">${activeCount}</div><div class="card-sub">used app or logged in</div></div>
   `;
 
   // Charts
@@ -550,15 +553,31 @@ async function loadOverview(){
 }
 
 async function drawDailyChart(){
-  const since = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
-  const { data } = await SB.from('usage_daily').select('date,usage_count').gte('date',since).order('date');
-  if(!data?.length){ return; }
+  const since = new Date(Date.now()-30*86400000).toISOString();
+  // Primary: nira_requests grouped by date
+  const { data: reqData } = await Promise.resolve(
+    SB.from('nira_requests').select('created_at').gte('created_at', since).limit(10000)
+  ).catch(()=>({data:null}));
 
-  // Aggregate by date
-  const byDate = {};
-  data.forEach(r=>{ byDate[r.date] = (byDate[r.date]||0) + (r.usage_count||0); });
-  const labels = Object.keys(byDate).sort();
-  const vals   = labels.map(d=>byDate[d]);
+  let labels, vals;
+  if(reqData && reqData.length > 0){
+    const byDate = {};
+    reqData.forEach(r=>{
+      const d = r.created_at?.slice(0,10);
+      if(d) byDate[d] = (byDate[d]||0)+1;
+    });
+    labels = Object.keys(byDate).sort();
+    vals   = labels.map(d=>byDate[d]);
+  } else {
+    // Fallback: usage_daily (historical)
+    const sinceDate = since.split('T')[0];
+    const { data } = await SB.from('usage_daily').select('date,usage_count').gte('date',sinceDate).order('date');
+    if(!data?.length){ return; }
+    const byDate = {};
+    data.forEach(r=>{ byDate[r.date] = (byDate[r.date]||0) + (r.usage_count||0); });
+    labels = Object.keys(byDate).sort();
+    vals   = labels.map(d=>byDate[d]);
+  }
 
   makeChart('chart-daily','line',labels,[{
     label:'Requests',data:vals,
@@ -602,11 +621,11 @@ async function drawRegsChart(){
 // ══════════════════════════════════════════════════════
 async function loadUsers(){
   // Start from user_profiles — every registered user
-  const [profilesRes, udRes, spRes, reqMetaRes] = await Promise.all([
+  const [profilesRes, spRes, niraReqRes] = await Promise.all([
     SB.from('user_profiles').select('id,email,full_name,created_at,last_sign_in_at'),
-    SB.from('usage_daily').select('user_id,date,usage_count').order('date',{ascending:false}).limit(5000),
     SB.from('saved_prompts').select('user_id,created_at').limit(5000),
-    Promise.resolve(SB.from('nira_requests').select('user_id,created_at').limit(5000)).catch(()=>({data:null}))
+    // nira_requests: per-user counts + timestamps (primary activity source)
+    Promise.resolve(SB.from('nira_requests').select('user_id,created_at').order('created_at',{ascending:false}).limit(10000)).catch(()=>({data:null}))
   ]);
 
   const userMap = {};
@@ -621,33 +640,41 @@ async function loadUsers(){
       lastLogin:   p.last_sign_in_at,
       totalReqs:   0,
       savedPrompts:0,
-      lastReq:     null,
-      firstReq:    null,
+      lastReq:     null,   // ISO string from nira_requests
+      firstReq:    null,   // ISO string from nira_requests
       lastActivity:null,
       dailyData:   []
     };
   });
 
-  // Add usage_daily data
-  (udRes.data||[]).forEach(r=>{
+  // Add nira_requests data — primary source for request counts and timestamps
+  (niraReqRes.data||[]).forEach(r=>{
     if(!userMap[r.user_id]) userMap[r.user_id] = { user_id:r.user_id, totalReqs:0, dailyData:[] };
-    userMap[r.user_id].totalReqs += (r.usage_count||0);
-    userMap[r.user_id].dailyData.push(r);
-    if(!userMap[r.user_id].lastReq || r.date > userMap[r.user_id].lastReq) userMap[r.user_id].lastReq = r.date;
-    if(!userMap[r.user_id].firstReq || r.date < userMap[r.user_id].firstReq) userMap[r.user_id].firstReq = r.date;
+    userMap[r.user_id].totalReqs += 1;
+    // lastReq: newest created_at (data is DESC ordered so first occurrence wins)
+    if(!userMap[r.user_id].lastReq) userMap[r.user_id].lastReq = r.created_at;
+    // firstReq: oldest — update each time (last item in sorted DESC = earliest)
+    userMap[r.user_id].firstReq = r.created_at;
+    // lastActivity = lastReq (same field, more descriptive)
+    if(!userMap[r.user_id].lastActivity) userMap[r.user_id].lastActivity = r.created_at;
   });
+
+  // If nira_requests is empty/unavailable, fall back to usage_daily for legacy totals
+  const hasNiraReqs = (niraReqRes.data||[]).length > 0;
+  if(!hasNiraReqs){
+    const { data: udData } = await SB.from('usage_daily').select('user_id,date,usage_count').order('date',{ascending:false}).limit(5000);
+    (udData||[]).forEach(r=>{
+      if(!userMap[r.user_id]) userMap[r.user_id] = { user_id:r.user_id, totalReqs:0, dailyData:[] };
+      userMap[r.user_id].totalReqs += (r.usage_count||0);
+      userMap[r.user_id].dailyData.push(r);
+      if(!userMap[r.user_id].lastReq || r.date > userMap[r.user_id].lastReq) userMap[r.user_id].lastReq = r.date;
+      if(!userMap[r.user_id].firstReq || r.date < userMap[r.user_id].firstReq) userMap[r.user_id].firstReq = r.date;
+    });
+  }
 
   // Add saved prompts count
   (spRes.data||[]).forEach(r=>{
     if(userMap[r.user_id]) userMap[r.user_id].savedPrompts = (userMap[r.user_id].savedPrompts||0)+1;
-  });
-
-  // Add last activity from nira_requests
-  (reqMetaRes.data||[]).forEach(r=>{
-    if(userMap[r.user_id]){
-      if(!userMap[r.user_id].lastActivity || r.created_at > userMap[r.user_id].lastActivity)
-        userMap[r.user_id].lastActivity = r.created_at;
-    }
   });
 
   allUsers = Object.values(userMap).sort((a,b)=>(b.totalReqs||0) - (a.totalReqs||0));
@@ -780,7 +807,7 @@ async function openDetail(userId){
         <div class="dp-stat"><div class="lbl">Last Login</div><div class="val" style="font-size:13px">${fmtRelative(u?.lastLogin)}</div></div>
         <div class="dp-stat"><div class="lbl">First Activity</div><div class="val" style="font-size:13px">${fmtDate(u?.firstReq)}</div></div>
         <div class="dp-stat"><div class="lbl">Last Activity</div><div class="val" style="font-size:13px">${fmtRelative(u?.lastReq||u?.lastActivity)}</div></div>
-        <div class="dp-stat"><div class="lbl">Total Requests</div><div class="val">${u?.totalReqs||0}</div><div class="sub">from usage_daily</div></div>
+        <div class="dp-stat"><div class="lbl">Total Requests</div><div class="val">${u?.totalReqs||0}</div><div class="sub">tracked requests</div></div>
       </div>
     </div>
 
@@ -850,33 +877,66 @@ async function loadUsageAnalytics(){
   el.innerHTML = '<div class="loading-state"><div class="spinner"></div></div>';
 
   const now = new Date();
-  const dayAgo   = new Date(now-86400000).toISOString().split('T')[0];
-  const weekAgo  = new Date(now-7*86400000).toISOString().split('T')[0];
-  const monthAgo = new Date(now-30*86400000).toISOString().split('T')[0];
-  const today    = now.toISOString().split('T')[0];
+  // ISO timestamps for nira_requests
+  const fromISO = usagePeriod==='day'   ? new Date(now-86400000).toISOString()
+                : usagePeriod==='week'  ? new Date(now-7*86400000).toISOString()
+                : usagePeriod==='month' ? new Date(now-30*86400000).toISOString()
+                : null;  // null = all time
 
-  const from = usagePeriod==='day' ? dayAgo : usagePeriod==='week' ? weekAgo : usagePeriod==='month' ? monthAgo : null;
+  const periodLabel = usagePeriod==='all'?'all time':usagePeriod==='day'?'today':usagePeriod==='week'?'last 7 days':'last 30 days';
 
-  let q = SB.from('usage_daily').select('*').lte('date',today).order('date');
-  if(from) q = q.gte('date',from);
-  const { data } = await q;
-  if(!data){ el.innerHTML='<div class="empty-state">No data</div>'; return; }
+  // PRIMARY: nira_requests
+  let niraQ = SB.from('nira_requests').select('user_id,created_at,tool').order('created_at').limit(10000);
+  if(fromISO) niraQ = niraQ.gte('created_at', fromISO);
+  const { data: niraData } = await Promise.resolve(niraQ).catch(()=>({data:null}));
 
-  const totalReqs = data.reduce((a,r)=>a+(r.usage_count||0),0);
-  const uniqueUsers = new Set(data.map(r=>r.user_id)).size;
-  const avgPerUser  = uniqueUsers ? Math.round(totalReqs/uniqueUsers) : 0;
-  const peakDay     = data.reduce((a,r)=>(!a||r.usage_count>a.usage_count)?r:a, null);
+  let totalReqs, uniqueUsers, avgPerUser, peakDayLabel, peakDayCount, byDate={}, userTotals={};
+  const hasNira = niraData && niraData.length > 0;
+
+  if(hasNira){
+    // Aggregate from nira_requests
+    niraData.forEach(r=>{
+      const d = r.created_at?.slice(0,10);
+      if(d) byDate[d] = (byDate[d]||0)+1;
+      userTotals[r.user_id] = (userTotals[r.user_id]||0)+1;
+    });
+    totalReqs  = niraData.length;
+    uniqueUsers = Object.keys(userTotals).length;
+    avgPerUser  = uniqueUsers ? Math.round(totalReqs/uniqueUsers) : 0;
+    const peakEntry = Object.entries(byDate).sort((a,b)=>b[1]-a[1])[0];
+    peakDayLabel = peakEntry ? fmtDate(peakEntry[0]) : '—';
+    peakDayCount = peakEntry ? peakEntry[1] : 0;
+  } else {
+    // FALLBACK: usage_daily (historical data, no period filter on dates)
+    const today   = now.toISOString().split('T')[0];
+    const fromDate= fromISO ? fromISO.split('T')[0] : null;
+    let udQ = SB.from('usage_daily').select('*').lte('date',today).order('date');
+    if(fromDate) udQ = udQ.gte('date',fromDate);
+    const { data: udData } = await udQ;
+    if(!udData || !udData.length){
+      el.innerHTML='<div class="empty-state"><div class="empty-icon">📊</div><p>No data yet — requests will appear here after tracking deployment</p></div>';
+      return;
+    }
+    udData.forEach(r=>{
+      byDate[r.date] = (byDate[r.date]||0)+(r.usage_count||0);
+      userTotals[r.user_id] = (userTotals[r.user_id]||0)+(r.usage_count||0);
+    });
+    totalReqs   = udData.reduce((a,r)=>a+(r.usage_count||0),0);
+    uniqueUsers = Object.keys(userTotals).length;
+    avgPerUser  = uniqueUsers ? Math.round(totalReqs/uniqueUsers) : 0;
+    const peakEntry = Object.entries(byDate).sort((a,b)=>b[1]-a[1])[0];
+    peakDayLabel = peakEntry ? fmtDate(peakEntry[0]) : '—';
+    peakDayCount = peakEntry ? peakEntry[1] : 0;
+  }
 
   el.innerHTML = `
-    <div class="card gold"><div class="card-icon">⚡</div><div class="card-label">Total Requests</div><div class="card-val">${totalReqs.toLocaleString()}</div><div class="card-sub">${usagePeriod==='all'?'all time':usagePeriod==='day'?'today':usagePeriod==='week'?'last 7 days':'last 30 days'}</div></div>
+    <div class="card gold"><div class="card-icon">⚡</div><div class="card-label">Total Requests</div><div class="card-val">${totalReqs.toLocaleString()}</div><div class="card-sub">${periodLabel}</div></div>
     <div class="card green"><div class="card-icon">👥</div><div class="card-label">Active Users</div><div class="card-val">${uniqueUsers}</div><div class="card-sub">unique users with requests</div></div>
     <div class="card blue"><div class="card-icon">📈</div><div class="card-label">Avg per User</div><div class="card-val">${avgPerUser}</div><div class="card-sub">requests per active user</div></div>
-    <div class="card purple"><div class="card-icon">🏆</div><div class="card-label">Peak Day</div><div class="card-val" style="font-size:18px">${peakDay?fmtDate(peakDay.date):'—'}</div><div class="card-sub">${peakDay?(peakDay.usage_count+' requests'):'no data'}</div></div>
+    <div class="card purple"><div class="card-icon">🏆</div><div class="card-label">Peak Day</div><div class="card-val" style="font-size:18px">${peakDayLabel}</div><div class="card-sub">${peakDayCount?peakDayCount+' requests':'no data'}</div></div>
   `;
 
   // Daily chart
-  const byDate = {};
-  data.forEach(r=>{ byDate[r.date]=(byDate[r.date]||0)+(r.usage_count||0); });
   const dLabels = Object.keys(byDate).sort();
   const dVals   = dLabels.map(d=>byDate[d]);
   makeChart('chart-usage-daily','bar',dLabels,[{
@@ -884,9 +944,7 @@ async function loadUsageAnalytics(){
     backgroundColor:'rgba(201,168,76,.7)',borderColor:'#c9a84c',borderWidth:1
   }],{ scales:{x:{ticks:{maxTicksLimit:10}},y:{beginAtZero:true}} });
 
-  // Top users
-  const userTotals = {};
-  data.forEach(r=>{ userTotals[r.user_id]=(userTotals[r.user_id]||0)+(r.usage_count||0); });
+  // Top users chart
   const top10 = Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,10);
   makeChart('chart-top-users','bar',
     top10.map(([id])=>{ const u=allUsers.find(x=>x.user_id===id); return u?.email?.split('@')[0]||id.slice(0,8)+'…'; }),
@@ -898,27 +956,33 @@ async function loadUsageAnalytics(){
   const rkEl = document.getElementById('rankings-table');
   rkEl.innerHTML = `<table><thead><tr><th>#</th><th>User</th><th>Requests</th><th>Days Active</th></tr></thead><tbody>
     ${Object.entries(userTotals).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([uid,cnt],i)=>{
-      const daysActive = new Set(data.filter(r=>r.user_id===uid).map(r=>r.date)).size;
+      const daysActive = hasNira
+        ? new Set(niraData.filter(r=>r.user_id===uid).map(r=>r.created_at?.slice(0,10))).size
+        : '—';
       const u = allUsers.find(x=>x.user_id===uid);
       const label = u?.email || (u?.name ? u.name : uid.slice(0,12)+'…');
       return `<tr><td style="color:var(--gold);font-weight:700">#${i+1}</td><td style="font-size:12px">${label}</td><td><strong>${cnt}</strong></td><td>${daysActive}</td></tr>`;
     }).join('')}
   </tbody></table>`;
 
-  // Hour breakdown — from nira_requests if available
-  let reqQ = SB.from('nira_requests').select('created_at').limit(5000);
-  if(from) reqQ = reqQ.gte('created_at', from+'T00:00:00Z');
-  const { data: reqData } = await Promise.resolve(reqQ).catch(()=>({data:null}));
-  if(reqData && reqData.length > 0){
+  // Hour breakdown — from nira_requests
+  if(hasNira){
     const hours = Array(24).fill(0);
-    reqData.forEach(r=>{ if(r.created_at) hours[new Date(r.created_at).getHours()]++; });
+    niraData.forEach(r=>{ if(r.created_at) hours[new Date(r.created_at).getHours()]++; });
     makeChart('chart-by-hour','bar',
       Array.from({length:24},(_,i)=>i+':00'),
       [{label:'Requests',data:hours,backgroundColor:'rgba(74,144,226,.7)',borderColor:'#4a90e2',borderWidth:1}],
       { scales:{x:{ticks:{maxTicksLimit:12}},y:{beginAtZero:true}} }
     );
   } else {
-    document.getElementById('chart-by-hour').parentElement.innerHTML += '<div style="text-align:center;font-size:11px;color:var(--muted);padding:8px">Hour breakdown available after tracking deployment</div>';
+    const hourBox = document.getElementById('chart-by-hour')?.parentElement;
+    if(hourBox && !hourBox.querySelector('.no-data-note')){
+      const n=document.createElement('div');
+      n.className='no-data-note';
+      n.style.cssText='text-align:center;font-size:11px;color:var(--muted);padding:8px';
+      n.textContent='Hour breakdown available after tracking deployment';
+      hourBox.appendChild(n);
+    }
   }
 }
 
